@@ -34,7 +34,7 @@ V_list_non = []
 
 guess_non = []
 J = []
-
+f_error = False
 line_instructions = []
 working_list = []
 
@@ -46,12 +46,6 @@ removed = []
 solution = []
 filename = []
 excel_sheets = []
-
-
-# hoffset = 481.1525 + 25.63
-# soffset = 1.9077 + 0.8313
-
-
 
 
 def importexcelsheets():
@@ -268,26 +262,27 @@ def lims():
     for item in coolant2:
         try:
             PropsSI("PMIN", item)
+            p_lim[0] = PropsSI("PMIN", coolant2[0]) / 100000
+            p_lim[2] = PropsSI("Pcrit", coolant2[0]) / 100000
+            p_lim[1] = p_lim[2] + 300
+            t_lim[0] = PropsSI("TMIN", coolant2[0]) - 273.15
+            t_lim[2] = PropsSI("Tcrit", coolant2[0]) - 273.15
+            t_lim[1] = t_lim[2] + 300
+            h_lim[0] = enthalpy_pt(coolant2[0], [p_lim[1], t_lim[0]])
+            h_lim[1] = enthalpy_pt(coolant2[0], [p_lim[0], t_lim[1]])
+            h_lim[2] = enthalpy_pt(coolant2[0], [p_lim[2], t_lim[2]])
+            s_lim[0] = entropy_pt(coolant2[0], [p_lim[0], t_lim[0]])
+            s_lim[1] = entropy_pt(coolant2[0], [p_lim[0], t_lim[1]])
+            mix_lim[0] = min([p_lim[0], t_lim[0], h_lim[0]])
+            mix_lim[1] = max([p_lim[1], t_lim[1], h_lim[1]])
+            guess = []
+            solved = []
+            for x in range(len(V_list)):
+                solved.append(0)
+                guess.append(0)
         except:
             print(item," is not a coolprop fluid")
-    p_lim[0] = PropsSI("PMIN", coolant2[0]) / 100000
-    p_lim[2] = PropsSI("Pcrit", coolant2[0]) / 100000
-    p_lim[1] = p_lim[2] + 300
-    t_lim[0] = PropsSI("TMIN", coolant2[0]) - 273.15
-    t_lim[2] = PropsSI("Tcrit", coolant2[0]) - 273.15
-    t_lim[1] = t_lim[2] + 300
-    h_lim[0] = enthalpy_pt(coolant2[0], [p_lim[1], t_lim[0]])
-    h_lim[1] = enthalpy_pt(coolant2[0], [p_lim[0], t_lim[1]])
-    h_lim[2] = enthalpy_pt(coolant2[0], [p_lim[2], t_lim[2]])
-    s_lim[0] = entropy_pt(coolant2[0], [p_lim[0], t_lim[0]])
-    s_lim[1] = entropy_pt(coolant2[0], [p_lim[0], t_lim[1]])
-    mix_lim[0] = min([p_lim[0], t_lim[0], h_lim[0]])
-    mix_lim[1] = max([p_lim[1], t_lim[1], h_lim[1]])
-    guess = []
-    solved = []
-    for x in range(len(V_list)):
-        solved.append(0)
-        guess.append(0)
+            f_error =True
     print("end ")
 
 
@@ -314,9 +309,10 @@ def con(x, flist, vlist, na,flistf):
             try:
                 item = flist[y]
                 cool_c = eval(flistf[y])
+                f.append(cool_c - flist[y][len(flist[y]) - 1])
             except:
                 print("no function matching",flist[y][0],flist[y])
-            f.append(cool_c- flist[y][len(flist[y]) - 1])
+                f_error =True
         else:
             f.append(flist[y])
     tic1 = time.perf_counter()
@@ -339,9 +335,10 @@ def con_single(x, flist, vlist):
             c1.append(lambdify(vlist, flist[z+2], "numpy")(*x))
         try:
             cool_c = eval(flist[0] + "(flist[1],c1)")
+            sub_work = cool_c - flist[len(flist) - 1]
         except:
             print("no function matching", flist[0], flist)
-        sub_work = cool_c - flist[len(flist)-1]
+            f_error = True
     else:
         sub_work = flist
     return abs(lambdify(vlist, sub_work, "numpy")(*x))
@@ -472,8 +469,8 @@ def non_linear_solver(tol, testcon):
     sol = optimize.least_squares(con, guess_non, jac=conj, bounds=(bn1, bn2), args=(F_list_non, V_list_non, J,F_list_non_f),
                                  verbose=2, ftol=tol, xtol=tol, gtol=tol, loss='soft_l1')
     print("\n\ndone\n\n")
-    before = [abs(ele) for ele in con(guess_non, F_list_non, V_list_non, J)]
-    after = [abs(ele) for ele in con(sol.x, F_list_non, V_list_non, J)]
+    before = [abs(ele) for ele in con(guess_non, F_list_non, V_list_non, J,F_list_non_f)]
+    after = [abs(ele) for ele in con(sol.x, F_list_non, V_list_non, J,F_list_non_f)]
     print(sum(before))
     print(sum(after))
     print("\n\n")
@@ -586,7 +583,7 @@ def diagram_draw():
     diagram.save('logph.png', dpi=90)
 
 
-def solver():
+def solver(): # the main Solver function that is run from the UI button
     global J
     algebra_solver() #use is algebra to solve as many equations as possible
     solved_list = []
@@ -621,7 +618,6 @@ def solver():
             if isinstance(item, list):
                 expression = item[0] + "(item[1],c1)"
                 exp_as_func =compile(expression, '<string>', 'eval')
-                #exp_as_func = eval('lambda item,c1: ' + expression)
                 F_list_non_f.append(exp_as_func)
             else:
                 F_list_non_f.append(0)
@@ -663,7 +659,7 @@ file_list_column = [
         sg.Listbox(excel_sheets, size=(52, len(excel_sheets)), key='-sheet-')
     ],
     [sg.Input(key='line1')],
-    # [sg.Output(size=(71,10), key='-OUTPUT-')]
+    [sg.Output(size=(71,10), key='-OUTPUT-')]
 ]
 
 layout = [
