@@ -19,9 +19,10 @@ Arguments: sheet( holds the Excel sheet selected by the user in the interface), 
 translation function for translating the ees equations to a format that is that can be used in python. Automatically runs the limits function at the end. 
 Returns: nothing
 Arguments: None 
-the initial equations for translation are stored in the variable working_list. The equations come in two forms. 
+ the initial equations for translation are stored in the variable working_list. The equations come in two forms. 
 1. The first type of equation only contains: variables, numbers and standard math symbols. 
 2. the second type of Equation contains a function call. Which needs to be in the following form answer=functionname(‘Coolant’,a=ate,b=bee) At then gets translated into the following form ['functionname_ab', ‘Coolant’, a, b, answer].  the following is a sample of before and after h1=enthalpy('R744',P=p1,T=t1), ['enthalpy_pt', 'R744', p1, t1, h1]. The coolant can be available if you needed. If the coolant is not needed in the function It can just be replaced with ‘na’. 
+
 
 ## lims():
 Calculates the thermodynamic limits So that the cool pop functions don't get the values that they can't accept. 
@@ -50,3 +51,28 @@ For evaluating the matrix in parallel
 Returns: A single row of the matrix
 Arguments: x(List of values for each variable), vlist(List of variables), j(1 row of the jacobian Matrix)
 
+## Algebra_solver
+Attempts to solve each equation algebraically. This is done by initially looking for equations that only have one unsolved variable. If the equation does not feature a function The program uses the sympy function solve which can rearrange for the unsolved variable Then we can just substitute in all the known variables and get the answer.  For equations that do feature a function it initially calculates the solution with a randomly calculated guess. Since we know this equation equals 0 we know how far away the solution is from the correct answer.  we then  try taking away and adding that to the guess.  this should result in the answer to this variable. 
+Returns: nothing
+Arguments: None 
+
+## Jacobian
+jacobian matrix is a two dimensional Matrix full of the gradients Each row is the gradient for every variable in the system for one equation
+Returns: the Jacobian Matrix 
+Arguments: None 
+
+## Non_linear_solver
+Runs the main nonlinear Solver from scipy.  The solver is from the optimise package and uses the least squares algorithm. This function also generates the limits based on the letters used in the variable name. 
+Link to sicpy function https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html
+Returns: sol_out(list of variables and the solutions)
+Arguments: tol(Stores the tolerance that the Solver runs to)
+
+## Diagram_draw
+For drawing the final diagram 
+Returns: nothing
+Arguments: None 
+
+## solver
+the main Solver function that is run when the UI button is clicked. 
+Returns: nothing
+Arguments: None 
