@@ -5,11 +5,12 @@ from openpyxl import *
 from CoolProp.CoolProp import PropsSI
 import numpy as np
 from scipy import optimize
-import time,sys,random,math,copy,os
+import time,sys,random,math,copy,os,re
 from fluprodia import FluidPropertyDiagram
 import PySimpleGUI as sg
 from joblib import Parallel, delayed
 
+import timeit
 
 sheet_num = 1
 
@@ -48,25 +49,26 @@ filename = []
 excel_sheets = []
 
 
-def importexcelsheets():
+def importexcelsheets():#for reading the sheets that are in the Excel file
     global excel_sheets
     print("excel import get sheets", end=" -- ")
-    wb = load_workbook('eqs.xlsx', read_only=True, data_only=True)
+    wb = load_workbook(filename, read_only=True, data_only=True) #loads the file
     excel_sheets = wb.sheetnames
     wb.close()
     print("end")
 
 
-def importexcel(sheet):
+def importexcel(sheet):#Imports all three columns in spreadsheet
     global coolant, working_list, solution
     print("excel import start", end=" -- ")
-    wb = load_workbook('eqs.xlsx', read_only=True, data_only=True)
-    ws = wb[wb.sheetnames[sheet]]
+    wb = load_workbook(filename, read_only=True, data_only=True) #loads the file
+    ws = wb[wb.sheetnames[sheet]] #loads the user selected sheet
     z = 0
-    solution = []
-    working_list = []
+    solution = [] #solution holds answers to all the variables
+    working_list = [] #holds all of the non translated equations
+    #go through the Excel sheet col by col
     for col in ws.iter_rows(min_col=1, max_row=200, max_col=5, values_only=True):
-        if z != 0:
+        if z != 0: #skips over the first column which are the headers
             if col[0] != ' ':
                 if col[0] != None:
                     working_list.append(col[0].lower())
@@ -80,7 +82,7 @@ def importexcel(sheet):
     trans()
 
 
-def exportexcel(sheet, tosave):
+def exportexcel(sheet, tosave): #Save the answers back to the Excel sheet
     print("excel save start", end=" -- ")
     wb = load_workbook(filename)
     ws = wb[wb.sheetnames[sheet]]
@@ -258,9 +260,8 @@ def trans():
 def lims():
     global guess, solved, p_lim, t_lim, mix_lim
     print("lims start", end=" -- ")
-    print(coolant2,coolant2[0])
     for item in coolant2:
-        try:
+        try: #For testing if the fluid is a valid cool proper fluid
             PropsSI("PMIN", item)
             p_lim[0] = PropsSI("PMIN", coolant2[0]) / 100000
             p_lim[2] = PropsSI("Pcrit", coolant2[0]) / 100000
@@ -286,129 +287,111 @@ def lims():
     print("end ")
 
 
-def sub_in(x, sub, vlist):
-    try:
-        out1 = lambdify(vlist, sub, "numpy")(*x)
-    except:
-        print("exceptexcept", sub)
-        out1 = 99999999
-    if math.isnan(out1):
-        print("nannan", sub)
-        out1 = 99999999
-    return out1
-
-
-def con(x, flist, vlist, na,flistf):
-    tic = time.perf_counter()
+def con(x, flist, vlist, na): #Evaluates the list of Equations by substituting values into the equations.
+    #tic = time.perf_counter()
     f = []
-    for y in range(len(flist)):
-        if isinstance(flist[y], list):
-            c1 = []
+    for y in range(len(flist)): # iterates through the equations in flist
+        if isinstance(flist[y], list): #if equation features function
+            c1 = [] #Stores the input variables for the function
             for z in range(len(flist[y]) - 3):
                 c1.append(lambdify(vlist, flist[y][z + 2], "numpy")(*x))
             try:
-                item = flist[y]
-                cool_c = eval(flistf[y])
-                f.append(cool_c - flist[y][len(flist[y]) - 1])
+                cool_c = globals()[flist[y][0]](flist[y][1], c1)
+                f.append(cool_c - flist[y][len(flist[y]) - 1])  # Add the solution to a temporary list
             except:
                 print("no function matching",flist[y][0],flist[y])
                 f_error =True
         else:
-            f.append(flist[y])
-    tic1 = time.perf_counter()
-    out = lambdify(vlist, f, "numpy")(*x)
-    out = [abs(ele) for ele in out]
-    print("c=",time.perf_counter() - tic,time.perf_counter() - tic1)
+            f.append(flist[y]) #Add a Standard equation to a temporary list
+    #tic1 = time.perf_counter()
+    out = lambdify(vlist, f, "numpy")(*x) #Substitutes in values for all of the variables
+    out = [abs(ele) for ele in out] #Takes the absolute value of all of the answers To convert the problem from a roots problem to a minimum problem
+    #print("c=",time.perf_counter() - tic,time.perf_counter() - tic1)
     return out
 
-# def con(x, flist, vlist, na):
-#     tic = time.perf_counter()
-#     out = Parallel(n_jobs=-1)(delayed(con_single)(x, f, vlist) for f in flist)
-#     print("c=",time.perf_counter() - tic)
-#     return out
 
 
-def con_single(x, flist, vlist):
-    if isinstance(flist, list):
-        c1=[]
+def con_single(x, flist, vlist): #Evaluates a single equation by substituting values into the equations.
+    if isinstance(flist, list): #if equation features function
+        c1=[] #Stores the input variables for the function
         for z in range(len(flist)-3):
             c1.append(lambdify(vlist, flist[z+2], "numpy")(*x))
         try:
-            cool_c = eval(flist[0] + "(flist[1],c1)")
-            sub_work = cool_c - flist[len(flist) - 1]
+
+            cool_c = eval(flist[0] + "(flist[1],c1)") #Runs the function in the equation
+            sub_work = cool_c - flist[len(flist) - 1] #Add the solution to a temporary list
         except:
             print("no function matching", flist[0], flist)
             f_error = True
     else:
-        sub_work = flist
-    return abs(lambdify(vlist, sub_work, "numpy")(*x))
+        sub_work = flist #Add a Standard equation to a temporary list
+    return abs(lambdify(vlist, sub_work, "numpy")(*x)) #Substitutes in values for all of the variables And takes the absolute
 
-def conj(x, flist, vlist, j,flistf):
-    tic = time.perf_counter()
+
+def conj(x, flist, vlist, j): #Evaluates The jacobian Matrix by substituting values into the equations.
+    #tic = time.perf_counter()
     jj = np.array(copy.deepcopy(j))
-    for y in range(len(flist)):
-        if isinstance(flist[y], list):
-            vl = []
-            xl = []
-            for z in range(len(flist) - 3):
+    for y in range(len(flist)):# iterates through the equations in flist
+        if isinstance(flist[y], list):#if equation features function
+            vl = [] #List of the variables in the function
+            xl = [] # Lists of the values for those variables
+            for z in range(len(flist) - 3): # iterates through Variables in function
                 try:
-                    flist[y][z + 2].name
+                    flist[y][z + 2].name  # Checks if it is a variable or a number
                     vl.append(flist[y][z + 2])
                     xl.append(x[vlist.index(flist[y][z + 2])])
                 except:
                     pass
-            temp1 = optimize.approx_fprime(xl, con_single, 0.0001, flist[y], vl)
+            temp1 = optimize.approx_fprime(xl, con_single, 0.0001, flist[y], vl) #Estimates the gradient for the function
             for z in range(len(vl)):
-                jj[y][vlist.index(vl[z])] = float(temp1[z])
-    out = Parallel(n_jobs=-1)(delayed(conj_lam)(vlist, j, x) for j in jj)
-    print("j=",time.perf_counter() - tic)
+                jj[y][vlist.index(vl[z])] = float(temp1[z]) #Adds the answer from the estimate into its corresponding column in the Matrix
+    out = Parallel(n_jobs=-1)(delayed(conj_lam)(vlist, j, x) for j in jj) # Send each role of a function Evaluate and sub in values in parallel
+    #print("j=",time.perf_counter() - tic)
     return out
 
 
-def conj_lam(vlist, j, x):
+def conj_lam(vlist, j, x): #For evaluating the matrix in parallel
     out = lambdify(vlist, SparseMatrix(j), "numpy")(*x)
-    out = [i if not math.isnan(i) else 9999999 for i in np.squeeze(out)]
+    out = [i if not math.isnan(i) else 9999999 for i in np.squeeze(out)]  #checks for divide by 0 error
     return out
 
 
-def algebra_solver():
+def algebra_solver(): #Attempts to solve each equation algebraically
     print("start algebra solver", end=" -- ")
-    solved_sum = [0, 1]
+    solved_sum = [0, 1] #Stores how many equations were solved on each iteration of the loop
     y = 0
-    while solved_sum[y] != solved_sum[y + 1]:
-        y = y + 1
-        for x in range(len(F_list_v)):
+    while solved_sum[y] != solved_sum[y + 1]: #Checks if the last iteration did not solve any more than the previous
+        y = y + 1 #iterates through the variable y
+        for x in range(len(F_list_v)): #iterates through the list F_list_v
             z = 0
-            for i in F_list_v[x]:
-                z = z + solved[V_list.index(i)]
-                if solved[V_list.index(i)] == 0:
+            for i in F_list_v[x]: #iterates through the sublist of F_list_v
+                z = z + solved[V_list.index(i)] #Checks if the variable has been solved
+                if solved[V_list.index(i)] == 0: #Records what variable is not solved
                     loc = V_list.index(i)
-            if len(F_list_v[x]) - z == 1:
-                if isinstance(F_list[x], list):
-                    out = con_single(guess, F_list[x], V_list)
-                    guess1 = guess.copy()
-                    guess2 = guess.copy()
-                    guess1[loc] = guess1[loc] + out
-                    guess2[loc] = guess2[loc] - out
-                    if round(con_single(guess1, F_list[x], V_list), 4) == 0:
+            if len(F_list_v[x]) - z == 1: #Checks if only one variable is not solved
+                if isinstance(F_list[x], list):#if equation features function
+                    out = con_single(guess, F_list[x], V_list) #Calculates the answer to the equation with the current guess
+                    guess1 = guess.copy() #creates a copy of the list of guess
+                    guess2 = guess.copy() #creates a copy of the list of guess
+                    guess1[loc] = guess1[loc] + out  #adds the answer of the equation to the guess
+                    guess2[loc] = guess2[loc] - out  #Subtracts the answer of the equation to the guess
+                    if round(con_single(guess1, F_list[x], V_list), 4) == 0: #Checks if the new Guess makes the equation equals 0
                         guess[loc] = guess1[loc]
                         solved[loc] = 1
-                        print(F_list[x])
-                    elif round(con_single(guess2, F_list[x], V_list), 4) == 0:
+                    elif round(con_single(guess2, F_list[x], V_list), 4) == 0: #Checks if the new Guess makes the equation equals 0
                         guess[loc] = guess2[loc]
                         solved[loc] = 1
-                        print(F_list[x])
-                    else:
+                    else: #Happens if the Solver is not working correctly
                         print("fluid property not solving")
                 else:
-                    solve_1 = list(solve(F_list[x], V_list[loc]))
-                    guess[loc] = sub_in(guess, solve_1[0], V_list)
-                    solved[loc] = 1
-        solved_sum.append(sum(solved))
+                    solve_1 = list(solve(F_list[x], V_list[loc])) #Rearrange is the equation algebraically
+                    guess[loc] =lambdify(V_list, solve_1[0], "numpy")(*guess) # substitutes in the solved equations
+                    solved[loc] = 1 #Sets that equation to be solved
+        solved_sum.append(sum(solved)) #Add the total number of solved equations
     print(solved_sum, " end")
 
 
-def jacobian():
+def jacobian(): #jacobian matrix is a two dimensional Matrix full of the gradients Each row is the gradient for every variable in the system for one equation
     F_list_w = copy.deepcopy(F_list_non)
     V_list_w = copy.deepcopy(V_list_non)
     print("jacobian start", end=" -- ")
@@ -416,114 +399,81 @@ def jacobian():
     jj = np.zeros((len(F_list_w), len(V_list_w)), dtype=object)
     for y in range(len(F_list_w)):
         for z in range(len(V_list_w)):
-            if isinstance(F_list_w[y], list):
-                if F_list_w[y][1] == V_list_w[z]:
-                    jj[y][z] = F_list_w[y].copy()
-                    jj[y][z].append(V_list_w[z])
-                elif F_list_w[y][2] == V_list_w[z]:
-                    jj[y][z] = F_list_w[y].copy()
-                    jj[y][z].append(V_list_w[z])
-                elif F_list_w[y][3] == V_list_w[z]:
-                    jj[y][z] = F_list_w[y].copy()
-                    jj[y][z].append(V_list_w[z])
-                else:
-                    jj[y][z] = 0
+            if isinstance(F_list_w[y], list): #if equation features function
+                for w in range(len(F_list_w[y]) - 2):  # iterates through Variables in function
+                    if F_list_w[y][w + 2] == V_list_w[z]:
+                        jj[y][z] = F_list_w[y].copy()   #Add the full equation to Matrix to be estimated later on Can not be calculated with function included
             else:
-                jj[y][z] = diff((F_list_w[y] ** 2) ** 0.5, V_list_w[z])
+                jj[y][z] = diff((F_list_w[y] ** 2) ** 0.5, V_list_w[z]) #Derivative calculated using the difference in function insympy
     print("end time = ", time.perf_counter() - tic)
     return jj
 
 
-def non_linear_solver(tol, testcon):
+def non_linear_solver(tol): #
     print("start nonlinear solver")
     tic = time.perf_counter()
     guess_non = []
     bn1 = []
     bn2 = []
-    for x in range(len(V_list_non)):
-        if V_list_non[x].name[0] == 't':
-            guess_non.append(random.uniform(29, 31))
-            bn1.append(t_lim[0])
+    for x in range(len(V_list_non)): #iterates through the equations in V_list_non
+        if V_list_non[x].name[0] == 't':  #detects variables starting with T assumed to be temp
+            guess_non.append(random.uniform(29, 31)) #Set the temperature to approximately room temperature
+            bn1.append(t_lim[0])    #Sets the upper and lower limits
             bn2.append(t_lim[1])
         elif V_list_non[x].name[0] == 'p':
             guess_non.append(random.uniform(9.9, 10.1))
             bn1.append(p_lim[0])
             bn2.append(p_lim[1])
         elif V_list_non[x].name[0] == 'h':
-            guess_non.append(random.uniform(h_lim[2] - 10, h_lim[2] + 10))
+            guess_non.append(random.uniform(h_lim[2] - 10, h_lim[2] + 10)) #Set the enthalpy A random number between the Max and min
             bn1.append(h_lim[0])
             bn2.append(h_lim[1])
         elif V_list_non[x].name[0] == 's':
-            guess_non.append(random.uniform(s_lim[0], s_lim[1]))
+            guess_non.append(random.uniform(s_lim[0], s_lim[1])) #Set the enthalpy A random number between the Max and min
             bn1.append(s_lim[0])
             bn2.append(s_lim[1])
         else:
             bn1.append(mix_lim[0])
             bn2.append(mix_lim[1])
             guess_non.append(random.uniform(1, 10))
-    if testcon == 1:
-        print("\ntest_gradients")
-        test_gradient()
-        print("test_gradient done\n")
-
-    sol = optimize.least_squares(con, guess_non, jac=conj, bounds=(bn1, bn2), args=(F_list_non, V_list_non, J,F_list_non_f),
+    print("\n\n")
+    # The function call for the solver
+    sol = optimize.least_squares(con, guess_non, jac=conj, bounds=(bn1, bn2), args=(F_list_non, V_list_non, J),
                                  verbose=2, ftol=tol, xtol=tol, gtol=tol, loss='soft_l1')
     print("\n\ndone\n\n")
-    before = [abs(ele) for ele in con(guess_non, F_list_non, V_list_non, J,F_list_non_f)]
-    after = [abs(ele) for ele in con(sol.x, F_list_non, V_list_non, J,F_list_non_f)]
-    print(sum(before))
-    print(sum(after))
+    # Evaluates the after for the results from the solver
+    after = [abs(ele) for ele in con(sol.x, F_list_non, V_list_non, J)]
     print("\n\n")
     for z in range(len(after)):
-        if round(after[z], 4) != 0:
-            print(round(after[z], 4), ", ", F_list_non[z])
+        print(round(after[z], 4), ", ", F_list_non[z]) #Displays how well each equation has been  solved
     print("\n\n")
     sol_out = []
     for z in range(len(sol.x)):
-        sol_out.append([V_list_non[z].name, round(sol.x[z], 4)])
+        sol_out.append([V_list_non[z].name, round(sol.x[z], 4)]) #Add the variables and their answers to a list for output
     print("end time = ", time.perf_counter() - tic)
     return sol_out
 
 
-def test_gradient():
-    # test conj
-    test1 = conj(guess_non, F_list_non, V_list_non, lim, J)
-    print(con(guess_non, F_list_non, V_list_non, lim, J))
-    test3 = 0
-    test4 = 0
-    for z in range(len(F_list_non)):
-        test2 = optimize.approx_fprime(guess_non, con_single, 0.0001, F_list_non[z], V_list_non, lim)
-        if round(sum(test2 - test1[z]), 3) != 0:
-            test4 = test4 + 1
-            print(test2)
-            print(test1[z])
-            print(z, '  ', sum(test2 - test1[z]), " ", F_list_non[z], "\n")
-            test3 = test3 + sum(test2 - test1[z])
-    print(test3, " ", test4)
-
-
 def diagram_draw():
-    p1 = []
+    p1 = [] #Ones list
     h1 = []
-    p10 = []
+    p10 = [] #10s list
     h10 = []
     for x in range(len(solution)):
-        if solution[x][0][0] == 'p':
-            if len(solution[x][0]) == 2:
-                p1.append([solution[x][0], solution[x][1], int(solution[x][0][1])])
-            else:
-                try:
-                    p10.append([solution[x][0], solution[x][1], int(solution[x][0][1]) * 10 + int(solution[x][0][2])])
-                except:
-                    pass
-        elif solution[x][0][0] == 'h':
-            if len(solution[x][0]) == 2:
-                h1.append([solution[x][0], solution[x][1], int(solution[x][0][1])])
-            else:
-                try:
-                    h10.append([solution[x][0], solution[x][1], int(solution[x][0][1]) * 10 + int(solution[x][0][2])])
-                except:
-                    pass
+        if solution[x][0][0] == 'p':    #Detects all variable starting with p
+            tempnum= re.sub("[^0-9]", "", solution[x][0])
+            if len(solution[x][0])-len(tempnum)==1:
+                if len(tempnum) == 1:
+                    p1.append([solution[x][0], solution[x][1], int(tempnum)])
+                elif len(tempnum) == 2:
+                    p10.append([solution[x][0], solution[x][1], int(tempnum)])
+        elif solution[x][0][0] == 'h':  #Detects all variable starting with h
+            tempnum = re.sub("[^0-9]", "", solution[x][0])
+            if len(solution[x][0])-len(tempnum)==1:
+                if len(tempnum) == 1:
+                    h1.append([solution[x][0], solution[x][1], int(tempnum)])
+                elif len(tempnum) == 2:
+                    h10.append([solution[x][0], solution[x][1], int(tempnum)])
     p1.extend(p10)
     h1.extend(h10)
     work_p = []
@@ -573,6 +523,7 @@ def diagram_draw():
                        y_min=xy_lim[1][1] - xy_lim[2][1], y_max=xy_lim[0][1] + xy_lim[2][1])
     diagram.calc_isolines()
     diagram.draw_isolines('logph')
+    # Loop for drawing all of the points and lines on the diagram
     for z in range(len(Point_coor)):
         for x in range(len(Point_coor[z]) - 1):
             diagram.ax.plot([Point_coor[z][x][0], Point_coor[z][x + 1][0]],
@@ -590,7 +541,6 @@ def solver(): # the main Solver function that is run from the UI button
     for x in range(len(V_list)):
         if solved[x] == 1: #if equations are solved
             solved_list.append([V_list[x].name, round(guess[x], 4)]) # adds all of the  solved variables and their answers to a list
-    print(len(V_list))
     if len(V_list) == sum(solved): #Checks if all variables have been solved
         print("all equations have been solved algebraically")
     else:
@@ -614,18 +564,9 @@ def solver(): # the main Solver function that is run from the UI button
             elif test1[z] != 0: #Checks if the equations have already been solved
                 F_list_non.append(test1[z])
 
-        for item in F_list_non:
-            if isinstance(item, list):
-                expression = item[0] + "(item[1],c1)"
-                exp_as_func =compile(expression, '<string>', 'eval')
-                F_list_non_f.append(exp_as_func)
-            else:
-                F_list_non_f.append(0)
-        print(F_list_non_f)
-
         J = jacobian() #generates the jacobian Matrix
 
-        x_out = non_linear_solver(1e-12, 2) #runs the nonlinear solver
+        x_out = non_linear_solver(1e-12) #runs the nonlinear solver
 
         for x in range(len(x_out)):
             solved_list.append([x_out[x][0], x_out[x][1]])
@@ -642,7 +583,7 @@ def solver(): # the main Solver function that is run from the UI button
     print(sheet_num)
     exportexcel(sheet_num, sorted_out)
 
-
+#Interface layout instructions
 image_viewer_column = [
     [sg.Image(key="-IMAGE-")],
 ]
@@ -659,7 +600,10 @@ file_list_column = [
         sg.Listbox(excel_sheets, size=(52, len(excel_sheets)), key='-sheet-')
     ],
     [sg.Input(key='line1')],
-    [sg.Output(size=(71,10), key='-OUTPUT-')]
+    [sg.Input(key='line2')],
+    [sg.Input(key='line3')],
+    [sg.Input(key='line4')],
+    #[sg.Output(size=(71,10), key='-OUTPUT-')]
 ]
 
 layout = [
@@ -677,32 +621,35 @@ def main():
     window = sg.Window("Image Viewer", layout).Finalize()
     while True:
         event, values = window.read()
-        if event == "-file-":
-            filename = values["-file-"]
+        if event == "-file-": #When file has been selected
+            filename = values["-file-"] #Variable stores the Excel sheet location
             importexcelsheets()
-            window["-sheet-"].update(values=excel_sheets)
-            window["TOUT1"].update('Select Excel Sheet')
-        if event == "BUTTON_draw":
+            window["-sheet-"].update(values=excel_sheets) #Displays the Sheeps and the Excel document
+            window["TOUT1"].update('Select Excel Sheet')   # updates the display
+        if event == "BUTTON_draw": #Draw button pressed
             if values['-sheet-']:
-                line_instructions = []
+                line_instructions = [] #The redrawing instructions list
                 line_instructions.append(values['line1'].split(","))
+                line_instructions.append(values['line2'].split(","))
+                line_instructions.append(values['line3'].split(","))
+                line_instructions.append(values['line4'].split(","))
                 sheet_num = excel_sheets.index(values['-sheet-'][0])
                 importexcel(sheet_num)
                 diagram_draw()
-                window["-IMAGE-"].update(filename='logph.png')
+                window["-IMAGE-"].update(filename='logph.png') # updates the display
             elif filename == []:
-                window["TOUT1"].update('No Excel file selected')
+                window["TOUT1"].update('No Excel file selected') # updates the display
             else:
-                window["TOUT1"].update('No sheet selected')
-        if event == 'BUTTON_solve':
+                window["TOUT1"].update('No sheet selected') # updates the display
+        if event == 'BUTTON_solve': #solve button pressed
             if values['-sheet-']:
                 sheet_num = excel_sheets.index(values['-sheet-'][0])
                 importexcel(sheet_num)
                 solver()
             elif filename == []:
-                window["TOUT1"].update('No Excel file selected')
+                window["TOUT1"].update('No Excel file selected') # updates the display
             else:
-                window["TOUT1"].update('No sheet selected')
+                window["TOUT1"].update('No sheet selected') # updates the display
         if event == "Exit" or event == sg.WIN_CLOSED:
             break
 
